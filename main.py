@@ -69,6 +69,7 @@ class DatabaseService:
                         'User_ID': 'N/A',
                         'Status': 'FAILURE',
                         'User_Action': 'N/A',
+                        'Outcome': 'FAILED',
                         'Reason': 'Orphan Lock - No User Mapping Found'
                     })
         return users_to_notify
@@ -89,55 +90,81 @@ def send_notifications(user_list, campaign_id):
                 'User_ID': user['user_id'],
                 'Status': 'SUCCESS',
                 'User_Action': 'NO_RESPONSE', 
+                'Outcome': 'PENDING',
                 'Reason': f'Notification Sent (Campgn: {campaign_id})'
             })
             
     return sent_count
 
-# --- ANALYTICS SIMULATION ---
+# --- ANALYTICS SIMULATION (User Clicks) ---
 def simulate_user_clicks(campaign_id, notified_users):
     clicks_data = []
-    
     if SIMULATION_MODE:
         print(f"\n🎲 [Analytics] Simulating user clicks...")
         for user in notified_users:
-            if random.random() < 0.4:
+            if random.random() < 0.6: # 60% Click Rate
                 clicks_data.append({
-                    'Timestamp': datetime.now().isoformat(),
-                    'Campaign_ID': campaign_id,
                     'User_ID': user['user_id'],
                     'Action': 'CLICKED'
                 })
         print(f"   ➡ Simulated {len(clicks_data)} clicks.")
     return clicks_data
 
+# --- EFFECTIVENESS SIMULATION (Physical Action) ---
+def simulate_conversions(campaign_id, notified_users):
+    """
+    Simulates users actually checking the battery (updating the lock timestamp).
+    This creates the 'Conversion Rate'.
+    """
+    conversions_data = []
+    if SIMULATION_MODE:
+        print(f"\n🔋 [Analytics] Simulating battery checks (Effectiveness)...")
+        for user in notified_users:
+            # 30% of users actually do the job (Conversion)
+            if random.random() < 0.3: 
+                conversions_data.append(user['user_id'])
+        print(f"   ➡ Simulated {len(conversions_data)} conversions (Battery Checked).")
+    return conversions_data
+
 # --- EXCEL REPORTING SERVICE ---
-def generate_excel_report(campaign_id, sent_count, clicks_data):
+def generate_excel_report(campaign_id, sent_count, clicks_data, conversions_data):
     filename = f"battery_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     
-    # 1. MERGE CLICK DATA INTO LOGS
+    # 1. MERGE DATA INTO LOGS
     clicked_user_ids = {c['User_ID'] for c in clicks_data}
+    converted_user_ids = set(conversions_data)
     
     for row in report_data:
-        if row['Status'] == 'SUCCESS' and row['User_ID'] in clicked_user_ids:
-            row['User_Action'] = 'OPENED'
+        if row['Status'] == 'SUCCESS':
+            # Update Click Status
+            if row['User_ID'] in clicked_user_ids:
+                row['User_Action'] = 'OPENED'
+            
+            # Update Effectiveness Outcome
+            if row['User_ID'] in converted_user_ids:
+                row['Outcome'] = 'EFFECTIVE' # User checked the battery
+            else:
+                row['Outcome'] = 'PENDING'
 
     # 2. Create DataFrames
     df_logs = pd.DataFrame(report_data)
-    
-    # Reorder columns
-    cols = ['Timestamp', 'Lock_ID', 'User_ID', 'Status', 'User_Action', 'Reason']
+    cols = ['Timestamp', 'Lock_ID', 'User_ID', 'Status', 'User_Action', 'Outcome', 'Reason']
     df_logs = df_logs[cols]
 
+    # Metrics Calculation
     click_count = len(clicks_data)
+    conversion_count = len(conversions_data)
+    
     ctr = (click_count / sent_count * 100) if sent_count > 0 else 0
+    effectiveness = (conversion_count / sent_count * 100) if sent_count > 0 else 0
     
     df_summary = pd.DataFrame([
         {'Metric': 'Campaign Date', 'Value': datetime.now().strftime('%Y-%m-%d')},
         {'Metric': 'Campaign ID', 'Value': campaign_id},
         {'Metric': 'Total Notifications Sent', 'Value': sent_count},
-        {'Metric': 'Total User Clicks', 'Value': click_count},
-        {'Metric': 'Click Through Rate (CTR)', 'Value': f"{ctr:.2f}%"}
+        {'Metric': 'User Clicks (CTR)', 'Value': f"{click_count} ({ctr:.1f}%)"},
+        {'Metric': 'Effective Conversions', 'Value': f"{conversion_count} ({effectiveness:.1f}%)"},
+        {'Metric': 'Analysis', 'Value': 'Effectiveness = Users who updated lock timestamp'}
     ])
 
     # 3. Write to Excel
@@ -148,7 +175,6 @@ def generate_excel_report(campaign_id, sent_count, clicks_data):
         worksheet = writer.sheets['Detailed Logs']
         from openpyxl.styles import PatternFill
         
-        # Define Colors
         green_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid') # Best (Opened)
         yellow_fill = PatternFill(start_color='FFFFCC', end_color='FFFFCC', fill_type='solid') # Okay (Sent)
         red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')   # Bad (Fail)
@@ -162,16 +188,16 @@ def generate_excel_report(campaign_id, sent_count, clicks_data):
                 fill = red_fill
             elif status == 'SUCCESS':
                 if action == 'OPENED':
-                    fill = green_fill  # Switched to Green!
+                    fill = green_fill  
                 else:
-                    fill = yellow_fill # Switched to Yellow!
+                    fill = yellow_fill
 
             if fill:
                 for col_idx in range(1, len(df_logs.columns) + 1):
                     worksheet.cell(row=row_idx, column=col_idx).fill = fill
 
     print(f"\n✅ Report generated: {filename}")
-    print(f"   📊 Stats: Sent={sent_count} | Clicks={click_count} | CTR={ctr:.2f}%")
+    print(f"   📊 Stats: Sent={sent_count} | CTR={ctr:.1f}% | Effective={effectiveness:.1f}%")
 
 # --- MAIN ---
 def main():
@@ -187,6 +213,7 @@ def main():
     users = []
     sent_count = 0
     clicks_data = []
+    conversions_data = []
     campaign_id = f"battery_check_{datetime.now().strftime('%Y_W%U')}"
 
     if stale_locks:
@@ -196,11 +223,12 @@ def main():
         # 3. Send Notifications
         sent_count = send_notifications(users, campaign_id)
         
-        # 4. Simulate Clicks
+        # 4. Analytics Simulation (Bonus Points)
         clicks_data = simulate_user_clicks(campaign_id, users)
+        conversions_data = simulate_conversions(campaign_id, users)
         
     # 5. Generate Report
-    generate_excel_report(campaign_id, sent_count, clicks_data)
+    generate_excel_report(campaign_id, sent_count, clicks_data, conversions_data)
 
 if __name__ == "__main__":
     main()
