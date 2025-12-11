@@ -1,19 +1,15 @@
 import time
 import json
 import os
+import random
 import pandas as pd
 from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
-# LOGIC:
-# 1. Look for an Environment Variable named 'SIMULATION_MODE'
-# 2. If found, convert string 'true'/'false' to boolean.
-# 3. Default to True (Simulation) if the variable is missing (Safety).
 env_sim = os.getenv('SIMULATION_MODE', 'True')
 SIMULATION_MODE = env_sim.lower() == 'true'
 
 # --- REPORTING DATA STORAGE ---
-# We will append dictionaries here to track what happened
 report_data = []
 
 # --- HELPER FOR DATES ---
@@ -66,25 +62,23 @@ class DatabaseService:
                         'fcm_token': data['fcm']
                     })
                 else:
-                    # LOG FAILURE: ORPHAN LOCK
                     print(f"⚠️ Warning: Lock {lid} is an orphan (No User Found).")
                     report_data.append({
                         'Timestamp': datetime.now().isoformat(),
                         'Lock_ID': lid,
                         'User_ID': 'N/A',
                         'Status': 'FAILURE',
+                        'User_Action': 'N/A',
                         'Reason': 'Orphan Lock - No User Mapping Found'
                     })
         return users_to_notify
 
 # --- NOTIFICATION SERVICE ---
-def send_notifications(user_list):
-    campaign_id = f"battery_check_{datetime.now().strftime('%Y_W%U')}"
+def send_notifications(user_list, campaign_id):
     sent_count = 0
     print(f"\nStarting Campaign: {campaign_id}")
 
     for user in user_list:
-        # LOG SUCCESS: NOTIFICATION SENT
         if SIMULATION_MODE:
             print(f"   ➡ [FCM SENT] User: {user['user_id']} | Lock: {user['lock_id']}")
             sent_count += 1
@@ -94,67 +88,119 @@ def send_notifications(user_list):
                 'Lock_ID': user['lock_id'],
                 'User_ID': user['user_id'],
                 'Status': 'SUCCESS',
+                'User_Action': 'NO_RESPONSE', 
                 'Reason': f'Notification Sent (Campgn: {campaign_id})'
             })
             
     return sent_count
 
+# --- ANALYTICS SIMULATION ---
+def simulate_user_clicks(campaign_id, notified_users):
+    clicks_data = []
+    
+    if SIMULATION_MODE:
+        print(f"\n🎲 [Analytics] Simulating user clicks...")
+        for user in notified_users:
+            if random.random() < 0.4:
+                clicks_data.append({
+                    'Timestamp': datetime.now().isoformat(),
+                    'Campaign_ID': campaign_id,
+                    'User_ID': user['user_id'],
+                    'Action': 'CLICKED'
+                })
+        print(f"   ➡ Simulated {len(clicks_data)} clicks.")
+    return clicks_data
+
 # --- EXCEL REPORTING SERVICE ---
-def generate_excel_report():
-    if not report_data:
-        print("No data to report.")
-        return
-
+def generate_excel_report(campaign_id, sent_count, clicks_data):
     filename = f"battery_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-    df = pd.DataFrame(report_data)
+    
+    # 1. MERGE CLICK DATA INTO LOGS
+    clicked_user_ids = {c['User_ID'] for c in clicks_data}
+    
+    for row in report_data:
+        if row['Status'] == 'SUCCESS' and row['User_ID'] in clicked_user_ids:
+            row['User_Action'] = 'OPENED'
 
-    # Use ExcelWriter to apply styles
+    # 2. Create DataFrames
+    df_logs = pd.DataFrame(report_data)
+    
+    # Reorder columns
+    cols = ['Timestamp', 'Lock_ID', 'User_ID', 'Status', 'User_Action', 'Reason']
+    df_logs = df_logs[cols]
+
+    click_count = len(clicks_data)
+    ctr = (click_count / sent_count * 100) if sent_count > 0 else 0
+    
+    df_summary = pd.DataFrame([
+        {'Metric': 'Campaign Date', 'Value': datetime.now().strftime('%Y-%m-%d')},
+        {'Metric': 'Campaign ID', 'Value': campaign_id},
+        {'Metric': 'Total Notifications Sent', 'Value': sent_count},
+        {'Metric': 'Total User Clicks', 'Value': click_count},
+        {'Metric': 'Click Through Rate (CTR)', 'Value': f"{ctr:.2f}%"}
+    ])
+
+    # 3. Write to Excel
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Report')
-        worksheet = writer.sheets['Report']
+        df_logs.to_excel(writer, index=False, sheet_name='Detailed Logs')
+        df_summary.to_excel(writer, index=False, sheet_name='Dashboard')
         
-        # Iterating through rows to apply conditional formatting
-        # Row 1 is header, data starts at Row 2
+        worksheet = writer.sheets['Detailed Logs']
+        from openpyxl.styles import PatternFill
+        
+        # Define Colors
+        green_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid') # Best (Opened)
+        yellow_fill = PatternFill(start_color='FFFFCC', end_color='FFFFCC', fill_type='solid') # Okay (Sent)
+        red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')   # Bad (Fail)
+
         for row_idx, row_data in enumerate(report_data, start=2):
             status = row_data['Status']
-            
-            # Define Colors
-            fill_color = None
-            if status == 'SUCCESS':
-                fill_color = 'C6EFCE' # Light Green
-            elif status == 'FAILURE':
-                fill_color = 'FFC7CE' # Light Red
-                
-            # Apply Color to the whole row
-            if fill_color:
-                from openpyxl.styles import PatternFill
-                fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
-                for col_idx in range(1, len(df.columns) + 1):
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-                    cell.fill = fill
+            action = row_data.get('User_Action', '')
+
+            fill = None
+            if status == 'FAILURE':
+                fill = red_fill
+            elif status == 'SUCCESS':
+                if action == 'OPENED':
+                    fill = green_fill  # Switched to Green!
+                else:
+                    fill = yellow_fill # Switched to Yellow!
+
+            if fill:
+                for col_idx in range(1, len(df_logs.columns) + 1):
+                    worksheet.cell(row=row_idx, column=col_idx).fill = fill
 
     print(f"\n✅ Report generated: {filename}")
+    print(f"   📊 Stats: Sent={sent_count} | Clicks={click_count} | CTR={ctr:.2f}%")
 
 # --- MAIN ---
 def main():
     mode_str = "SIMULATION" if SIMULATION_MODE else "PRODUCTION"
     print(f"--- Weekly Battery Check Job Started (Mode: {mode_str}) ---")
+    
     db = DatabaseService()
     
     # 1. Get Stale Locks
     stale_locks = db.get_stale_locks(days_threshold=30)
     print(f" Found {len(stale_locks)} stale locks.")
 
+    users = []
+    sent_count = 0
+    clicks_data = []
+    campaign_id = f"battery_check_{datetime.now().strftime('%Y_W%U')}"
+
     if stale_locks:
-        # 2. Get Users (Failures for orphans logged here)
+        # 2. Get Users
         users = db.get_user_details(stale_locks)
         
-        # 3. Send Notifications (Successes logged here)
-        count = send_notifications(users)
-        print(f"\n Job Finished. Total Notifications Sent: {count}")
+        # 3. Send Notifications
+        sent_count = send_notifications(users, campaign_id)
         
-    # 4. Generate the Excel Report
-    generate_excel_report()
+        # 4. Simulate Clicks
+        clicks_data = simulate_user_clicks(campaign_id, users)
+        
+    # 5. Generate Report
+    generate_excel_report(campaign_id, sent_count, clicks_data)
 
 if __name__ == "__main__":
     main()
