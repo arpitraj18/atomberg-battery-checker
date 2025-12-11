@@ -1,10 +1,16 @@
 import time
 import json
+import os
 import pandas as pd
 from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
-SIMULATION_MODE = True 
+# LOGIC:
+# 1. Look for an Environment Variable named 'SIMULATION_MODE'
+# 2. If found, convert string 'true'/'false' to boolean.
+# 3. Default to True (Simulation) if the variable is missing (Safety).
+env_sim = os.getenv('SIMULATION_MODE', 'True')
+SIMULATION_MODE = env_sim.lower() == 'true'
 
 # --- REPORTING DATA STORAGE ---
 # We will append dictionaries here to track what happened
@@ -131,7 +137,8 @@ def generate_excel_report():
 
 # --- MAIN ---
 def main():
-    print("--- Weekly Battery Check Job Started ---")
+    mode_str = "SIMULATION" if SIMULATION_MODE else "PRODUCTION"
+    print(f"--- Weekly Battery Check Job Started (Mode: {mode_str}) ---")
     db = DatabaseService()
     
     # 1. Get Stale Locks

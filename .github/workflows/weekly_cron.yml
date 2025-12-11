@@ -3,7 +3,14 @@ name: Weekly Battery Maintenance
 on:
   schedule:
     - cron: '0 10 * * 1' # Runs every Monday at 10:00 AM UTC
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
+    # This creates the Menu/Checkbox when you click "Run Workflow"
+    inputs:
+      simulation_mode:
+        description: 'Enable Simulation Mode?'
+        required: true
+        default: True
+        type: boolean
 
 jobs:
   battery-check:
@@ -22,17 +29,20 @@ jobs:
 
       - name: Run Script
         env:
-          SIMULATION_MODE: 'False' 
+          # LOGIC: 
+          # 1. If running automatically (cron), force 'True' (Safe Simulation).
+          # 2. If running manually, use whatever the Recruiter selected in the checkbox.
+          SIMULATION_MODE: ${{ github.event_name == 'schedule' && 'True' || inputs.simulation_mode }}
+          
+          # These secrets are needed ONLY if the user sets Simulation to 'False'
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: python main.py
 
-      # --- NEW STEP: UPLOAD REPORT ---
       - name: Upload Excel Report
         uses: actions/upload-artifact@v4
         with:
           name: battery-check-report
           path: ./*.xlsx
           retention-days: 5
-          
