@@ -1,93 +1,108 @@
-# Smart Lock Battery Monitor & Notification System
+# Smart Lock Battery Monitor & Analytics System
 
-This project is a backend data engineering service designed to identify smart locks that haven't had their battery checked in over 30 days. It automatically identifies stale locks, retrieves the owner's details, and sends a push notification (FCM) to prompt a check.
+This project is a backend data engineering service designed to identify smart locks that haven't had their battery checked in over 30 days. It automatically identifies stale locks, retrieves owner details, and sends push notifications (FCM) to prompt a check.
 
-The system includes built-in analytics to track **User Click-Through Rates (CTR)** and **Campaign Effectiveness (Conversion Rates)**.
+Beyond simple notifications, this system includes a **Simulation Engine** to generate realistic user behavior data and an **Analytics Module** to track Click-Through Rates (CTR) and Campaign Effectiveness.
+
+---
+
+## 🌟 Key Features
+
+* **Automated Stale Lock Detection:** Scans DynamoDB for locks with `last_checked_timestamp < 30_days`.
+* **Intelligent Routing:** Fetches owner details from PostgreSQL to map locks to users.
+* **Dual-Mode Execution:**
+    * **Simulation Mode (Default):** Runs locally or in CI/CD without credentials, using mock data to demonstrate logic.
+    * **Production Mode:** Connects to real AWS and Firebase services when credentials are provided.
+* **Advanced Analytics (Bonus Features):**
+    * **Click Tracking:** Simulates and measures how many users open the notification.
+    * **Conversion Tracking:** Measures "Effectiveness" by tracking if users actually checked their lock after the notification.
+* **Automated Reporting:** Generates a color-coded Excel report with detailed logs and a summary dashboard.
 
 ---
 
 ## 📂 Project Structure
 
-* **`main.py`**: The core Python script containing the business logic, database service classes, and analytics simulation.
-* **`.github/workflows/weekly_cron.yml`**: CI/CD pipeline configuration that automates this script to run every Monday at 10:00 AM UTC.
-* **`requirements.txt`**: List of Python dependencies (`boto3`, `pandas`, `openpyxl`, etc.).
-* **`battery_report_YYYY-MM-DD.xlsx`**: The automatically generated Excel report containing success/failure logs and an analytics dashboard.
-
----
-
-## 🧠 System Logic & Workflow
-
-The script follows a modular **Service Class** pattern:
-
-1.  **`DatabaseService`**:
-    * Connects to **DynamoDB** (Mocked or Real) to scan for locks with `last_checked_timestamp < 30_days_ago`.
-    * Connects to **PostgreSQL** (Mocked or Real) to fetch the `user_id` and `fcm_token` for those locks.
-    * Handles edge cases, such as "Orphan Locks" (locks that exist but have no assigned user).
-
-2.  **`NotificationService`**:
-    * Generates a unique `campaign_id` (e.g., `battery_check_2025_W50`).
-    * Sends an FCM notification to the user with this ID attached to the payload for tracking.
-
-3.  **Analytics Engine (Bonus Implementation)**:
-    * **Click Simulation**: Simulates users clicking the notification (randomized probability).
-    * **Conversion Simulation**: Simulates users actually performing the physical action of checking the lock (randomized probability).
-    * **Reporting**: Aggregates this data into an Excel Dashboard.
+* `main.py`: The core script containing business logic, database services, and the simulation engine.
+* `.github/workflows/weekly_cron.yml`: CI/CD pipeline for weekly automation. Includes a manual "Production Switch" for recruiters.
+* `requirements.txt`: Python dependencies (`boto3`, `pandas`, `openpyxl`, `firebase-admin`).
+* `battery_report_[DATE].xlsx`: The output report generated after every run.
 
 ---
 
 ## 🚀 How to Run
 
-### 1. Simulation Mode (Default)
-The script is designed to run out-of-the-box without needing AWS credentials. It uses internal mock data to demonstrate the logic.
+### 1. Run Locally (Simulation Mode)
+This is the default mode. It requires no AWS keys and uses internal mock data.
 
-**Steps:**
-1.  Install dependencies:
+1.  **Install Dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
-2.  Run the script:
+2.  **Run the Script:**
     ```bash
     python main.py
     ```
-3.  **Output:**
-    * Console logs showing the mock process.
-    * A generated Excel file (`battery_report_....xlsx`) with color-coded logs.
+3.  **View Output:** A new file `battery_report_YYYY-MM-DD.xlsx` will appear in your folder.
 
-### 2. Production Mode (Real Database)
-To connect to live AWS DynamoDB and PostgreSQL instances:
+### 2. Run in Production (Real Database)
+To switch to live data, you must provide environment variables.
 
-1.  Set the environment variable `SIMULATION_MODE` to `False`.
-2.  Export the required credentials in your environment (or CI/CD Secrets):
+1.  **Set Environment Variables:**
     ```bash
+    export SIMULATION_MODE="False"
     export AWS_ACCESS_KEY_ID="your_key"
     export AWS_SECRET_ACCESS_KEY="your_secret"
     export DB_HOST="your_rds_host"
     export DB_PASSWORD="your_db_password"
     ```
+2.  **Run the Script:**
+    ```bash
+    python main.py
+    ```
+
+### 3. Run via CI/CD (GitHub Actions)
+The project includes a GitHub Actions workflow that runs automatically every Monday.
+* **Manual Trigger:** You can manually trigger the workflow from the "Actions" tab.
+* **Production Toggle:** When running manually, a checkbox **"Enable Simulation Mode?"** appears. Unchecking it allows you to run against production (if Secrets are configured).
 
 ---
 
-## 📊 Analytics & Reporting (Bonus Points)
+## 📊 Understanding the Generated Report
 
-The script generates an Excel report with two sheets:
+The script generates an Excel file with two sheets. Here is how to interpret the data.
 
 ### Sheet 1: Detailed Logs
-A color-coded breakdown of every notification attempt:
-* 🟢 **Green (OPENED):** User received and clicked the notification.
-* 🟡 **Yellow (NO_RESPONSE):** Notification sent successfully, but user hasn't clicked yet.
-* 🔴 **Red (FAILURE):** Error occurred (e.g., Orphan lock with no user mapping).
+This sheet tracks every individual notification attempt.
+
+| Column | Meaning |
+| :--- | :--- |
+| **Timestamp** | Exact time the notification was sent. |
+| **Lock_ID** | The ID of the stale lock. |
+| **User_ID** | The owner of the lock. |
+| **Status** | **SUCCESS:** Message sent to FCM.<br>**FAILURE:** Error occurred (e.g., Orphan lock). |
+| **User_Action** | **OPENED:** User clicked the notification.<br>**NO_RESPONSE:** User ignored it. |
+| **Outcome** | **EFFECTIVE:** User physically checked the lock (Conversion).<br>**PENDING:** No action taken yet. |
+
+**Color Coding Guide:**
+* 🟢 **Green:** Success! The user received the message **AND** opened it.
+* 🟡 **Yellow:** Pending. The message was sent successfully, but the user hasn't opened it yet.
+* 🔴 **Red:** Failure. Technical error (e.g., Lock exists but has no owner).
 
 ### Sheet 2: Dashboard
-A high-level summary for stakeholders:
-* **Total Sent:** Number of stale locks identified.
-* **Click Through Rate (CTR):** `%` of users who opened the app.
-* **Effective Conversions:** `%` of users who actually checked their battery (Outcome = `EFFECTIVE`).
+A high-level summary for stakeholders to measure campaign performance.
+
+| Metric | Definition |
+| :--- | :--- |
+| **Campaign ID** | Unique ID for the weekly run (e.g., `bat_check_2025_W50`). |
+| **Sent** | Total number of stale locks identified and notified. |
+| **Clicks (CTR)** | **Click-Through Rate:** Percentage of users who tapped the notification.<br>*(Formula: Clicks / Sent * 100)* |
+| **Effectiveness** | **Conversion Rate:** Percentage of users who actually checked their lock battery.<br>*(Formula: Conversions / Sent * 100)* |
 
 ---
 
-## 🤖 CI/CD Automation (GitHub Actions)
-
-The project includes a GitHub Actions workflow (`weekly_cron.yml`) that:
-1.  **Runs Automatically:** Scheduled via Cron (`0 10 * * 1`) to run every Monday.
-2.  **Runs Manually:** Includes a `workflow_dispatch` trigger with a **Checkbox Input**, allowing the recruiter/admin to toggle between Simulation Mode and Production Mode directly from the GitHub UI.
-3.  **Artifacts:** Automatically uploads the generated Excel report to the GitHub Run summary for download.
+## 🛠 Tech Stack
+* **Language:** Python 3.9
+* **Data Processing:** Pandas
+* **Reporting:** OpenPyXL (Excel generation)
+* **Cloud (Mocked/Real):** AWS DynamoDB, PostgreSQL, Firebase FCM
+* **Automation:** GitHub Actions
