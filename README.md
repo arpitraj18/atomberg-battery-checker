@@ -6,7 +6,7 @@ Beyond simple notifications, this system includes a **Simulation Engine** to gen
 
 ---
 
-## 🌟 Key Features
+##  Key Features
 
 * **Automated Stale Lock Detection:** Scans DynamoDB for locks with `last_checked_timestamp < 30_days`.
 * **Intelligent Routing:** Fetches owner details from PostgreSQL to map locks to users.
@@ -20,7 +20,7 @@ Beyond simple notifications, this system includes a **Simulation Engine** to gen
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
 * `main.py`: The core script containing business logic, database services, and the simulation engine.
 * `.github/workflows/weekly_cron.yml`: CI/CD pipeline for weekly automation. Includes a manual "Production Switch" for recruiters.
@@ -29,7 +29,7 @@ Beyond simple notifications, this system includes a **Simulation Engine** to gen
 
 ---
 
-## 🚀 How to Run
+##  How to Run
 
 ### 1. Run Locally (Simulation Mode)
 This is the default mode. It requires no AWS keys and uses internal mock data.
@@ -67,7 +67,7 @@ The project includes a GitHub Actions workflow that runs automatically every Mon
 
 ---
 
-## 📊 Understanding the Generated Report
+##  Understanding the Generated Report
 
 The script generates an Excel file with two sheets. Here is how to interpret the data.
 
